@@ -1,6 +1,5 @@
 from fastapi import FastAPI
-from app.api import documents, search
-from app.config import settings
+from app.routes.documents import router as documents_router
 
 app = FastAPI(
     title="AI Document Intelligence & Semantic Search API",
@@ -8,13 +7,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
-app.include_router(search.router, prefix="/api/v1/search", tags=["search"])
-
 @app.get("/")
 async def root():
     return {"message": "AI Document Intelligence & Semantic Search API"}
 
-@app.get("/health")
+@app.get("/api/v1/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy",
+            "version": "1.0",}
+
+app.include_router(
+    documents_router, 
+    prefix="/api/v1/documents",
+    tags=["Documents"]
+    )
