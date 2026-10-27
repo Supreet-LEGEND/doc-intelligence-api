@@ -1,8 +1,10 @@
 from pathlib import Path
 from uuid import uuid4
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from app.database import create_document, list_documents
-from app.schemas.documents import DocumentResponse, DocumentListResponse
+from app.database import create_document, list_documents, get_document, save_chunks
+from app.schemas.documents import DocumentResponse, DocumentListResponse, DocumentTextResponse
+from app.services.text_extraction import extract_text
+from app.services.text_processing import clean_text, chunk_text
 
 router = APIRouter()
 
@@ -109,4 +111,123 @@ async def upload_document(file: UploadFile = File(...)):
         "size_bytes": size,
         "status": "uploaded",
         "created_at": created_at,
+    }
+
+
+
+@router.post(
+    "/{document_id}/extract",
+    response_model=DocumentTextResponse,
+)
+def extract_document(document_id: str):
+    record = get_document(document_id)
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    stored_path = UPLOAD_DIR / record["stored_filename"]
+
+    print("Document ID:", document_id)
+    print("Stored filename:", record["stored_filename"])
+    print("Upload directory:", UPLOAD_DIR.resolve())
+    print("Full file path:", stored_path.resolve())
+    print("File exists:", stored_path.is_file())
+
+    print(f"Extracting text from {stored_path}...")
+
+    try:
+        result = extract_text(stored_path)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Stored document file not found.",
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not read this document.",
+        )
+
+    text = result["text"]
+
+    return {
+        "document_id": record["document_id"],
+        "filename": record["filename"],
+        "page_count": result["page_count"],
+        "character_count": len(text),
+        "text": text,
+    }
+
+
+
+@router.post("/{document_id}/process")
+def process_document(document_id: str):
+    # 1. Find the uploaded document in SQLite.
+    record = get_document(document_id)
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    # 2. Locate the actual stored file.
+    stored_path = UPLOAD_DIR / record["stored_filename"]
+
+    # 3. Extract its text.
+    try:
+        extracted = extract_text(stored_path)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Stored document file not found.",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract text from this document.",
+        ) from exc
+
+    # 4. Clean the extracted text.
+    cleaned_text = clean_text(extracted["text"])
+
+    if not cleaned_text:
+        raise HTTPException(
+            status_code=422,
+            detail="No extractable text was found in this document.",
+        )
+
+    # 5. Split the text using LangChain.
+    chunks = chunk_text(
+        cleaned_text,
+        chunk_size=1000,
+        overlap=150,
+    )
+
+    if not chunks:
+        raise HTTPException(
+            status_code=422,
+            detail="No text chunks could be created.",
+        )
+
+    # 6. Save the chunks in SQLite.
+    save_chunks(document_id, chunks)
+
+    # 7. Return processing details for testing.
+    return {
+        "document_id": document_id,
+        "filename": record["filename"],
+        "page_count": extracted["page_count"],
+        "character_count": len(cleaned_text),
+        "chunk_count": len(chunks),
+        "chunk_preview": chunks[:3],  # Return only the first 3 chunks for preview
+        "status": "processed",
     }

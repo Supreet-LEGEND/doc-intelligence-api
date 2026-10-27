@@ -1,5 +1,22 @@
+# Virtual environment
 .venv/
-app/__pycache__/
-*.pyc
-.env
+venv/
+
+# Python cache & pytest artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local databases (including WAL and shared memory files)
+*.db
+*.db-wal
+*.db-shm
+
+# Runtime data (uploaded files and FAISS binary indexes)
 data/uploads/*
+data/indexes/*
+!data/uploads/.gitkeep
+!data/indexes/.gitkeep
+
+# Environment variables / API keys 
+.env
